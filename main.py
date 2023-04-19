@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from botocore.exceptions import ClientError
+from typing import Optional
 import boto3
 import datetime
 import uuid
@@ -15,7 +16,7 @@ async def root():
 
 class Todo(BaseModel):
   userid: str
-  text: str
+  todotext: str
   done: bool
   due: datetime.datetime
 
@@ -24,7 +25,6 @@ class Todo(BaseModel):
 @app.get("/todos/{userid}")
 async def get_todos(userid: str):
   try:
-    # resp = table.query(KeyConditionExpression=boto3.dynamodb.conditions.Key("userid").eq(userid))
     resp = table.scan(FilterExpression=boto3.dynamodb.conditions.Attr("userid").eq(userid))
     return resp["Items"]
   except ClientError as err:
@@ -39,7 +39,7 @@ async def create_todo(todo: Todo):
       Item={
         "todoid": todoid,
         "userid": todo.userid,
-        "text": todo.text,
+        "todotext": todo.todotext,
         "done": todo.done,
         "due": todo.due.isoformat()
       }
@@ -70,27 +70,42 @@ async def delete_todo(todoid: str):
     print(err)
     raise HTTPException(500, "error getting todo")
 
+class UpdateTodo(BaseModel):
+  userid: str
+  todotext: Optional[str]
+  done: Optional[bool]
+  due: Optional[datetime.datetime]
+
 @app.put("/todo/{todoid}")
-async def modify_todo(todoid: str, todo: Todo):
+async def modify_todo(todoid: str, todo: UpdateTodo):
+  my_update_expression = "SET "
+  my_expression_attribute_values = {}
+
+  if todo.todotext != None: 
+    my_update_expression += "todotext = :valtxt,"
+    my_expression_attribute_values[":valtxt"] = todo.todotext
+  
+  if todo.done != None:
+    my_update_expression += "done = :valdone,"
+    my_expression_attribute_values[":valdone"] = todo.done
+  
+  if todo.due != None:
+    my_update_expression += "done = :valdue,"
+    my_expression_attribute_values[":valdue"] = todo.due
+  
+  if (todo.todotext == None) & (todo.done != None) & (todo.due != None):
+    raise HTTPException(400, "nothing to update")
+  
+  # cut the last comma
+  my_update_expression = my_update_expression[0:-1]
+
   try:
     resp = table.update_item(
       Key={
           "todoid": todoid,
       },
-      AttributeUpdates={
-        "text": {
-          "Value": todo.text,
-          "Action": "PUT"
-        },
-        "done": {
-          "Value": todo.done,
-          "Action": "PUT"
-        },
-        "due": {
-          "Value": todo.due.isoformat(),
-          "Action": "PUT"
-        }
-      },
+      UpdateExpression=my_update_expression,
+      ExpressionAttributeValues=my_expression_attribute_values,
       ReturnValues="ALL_NEW"
     )
     return resp["Attributes"]
