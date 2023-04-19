@@ -35,7 +35,7 @@ async def get_todos(userid: str):
 async def create_todo(todo: Todo):
   todoid = str(uuid.uuid4())
   try:
-    resp = table.put_item(
+    table.put_item(
       Item={
         "todoid": todoid,
         "userid": todo.userid,
